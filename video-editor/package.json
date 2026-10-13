@@ -1,0 +1,19 @@
+{
+  "name": "video-editor",
+  "version": "1.5.1",
+  "description": "영상 편집기 (Windows 데스크톱, AI 없는 버전)",
+  "main": "main.mjs",
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "build:exe": "bun build --compile --minify --target=bun-windows-x64 --windows-hide-console main.mjs --outfile dist/VideoEditor.exe"
+  },
+  "author": "구트",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "bun": "^1.4.2"
+  },
+  "dependencies": {
+    "@webviewjs/webview": "^0.4.7"
+  },
+  "private": true
+}
