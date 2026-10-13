@@ -12,7 +12,7 @@ const isWin = process.platform === 'win32';
 
 // ───────── 로컬 영상 서버 ─────────
 const served = new Map(); // token -> { path, size }
-const MIME = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.flac': 'audio/flac', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/webm', '.ogv': 'video/ogg', '.avi': 'video/x-msvideo', '.wmv': 'video/x-ms-wmv', '.mts': 'video/mp2t', '.m2ts': 'video/mp2t', '.ts': 'video/mp2t' };
+const MIME = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.flac': 'audio/flac', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/webm', '.ogv': 'video/ogg', '.avi': 'video/x-msvideo', '.wmv': 'video/x-ms-wmv', '.mts': 'video/mp2t', '.m2ts': 'video/mp2t', '.ts': 'video/mp2t', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp' };
 let server = null;
 function startServer() {
   if (server) return server;
@@ -142,7 +142,10 @@ export const XFADE = new Set(('fade fadeblack fadewhite fadegrays fadefast fades
   'pixelize hblur squeezeh squeezev zoomin').split(' '));
 
 // job 스펙: { name, outDir, width, height, fps, quality:'high'|'normal'|'small', encoder:'auto'|'cpu',
-//            segments:[{path, srcIn, srcOut}], subtitles:[{png(base64), x, y, start, end}] }
+//            segments:[{path, srcIn, srcOut} | {gap:true, srcIn:0, srcOut:길이}],   V1 (빈칸은 검정 화면 + 무음)
+//            audios:[{path, srcIn, srcOut, start, vol, fi, fo, bgm}],               오디오 트랙 (bgm: 말할 때 줄이기 대상)
+//            overlays:[{kind:'video'|'image'|'gif', path, srcIn, srcOut, start, end, x, y, w, h, opacity, fi, fo}],  V2 이상 (아래 트랙부터)
+//            subtitles:[{png(base64), x, y, start, end}] }
 export async function exportStart(spec) {
   if (job && job.state === 'running') throw new Error('이미 내보내는 중이에요');
   const ff = await findFfmpeg();
@@ -166,8 +169,8 @@ export async function exportStart(spec) {
     try {
       // 오디오 유무 확인 (파일마다 한 번)
       const audioMap = new Map();
-      for (const s of spec.segments) if (!audioMap.has(s.path)) audioMap.set(s.path, await hasAudio(ff.path, s.path));
-      const extra = [];   // 분리된 소리 (A2): 소리가 있는 것만
+      for (const s of spec.segments) if (!s.gap && !audioMap.has(s.path)) audioMap.set(s.path, await hasAudio(ff.path, s.path));
+      const extra = [];   // 오디오 트랙(A2 이상)·위 트랙 영상의 소리: 소리가 있는 것만
       for (const x of spec.audios || []) {
         if (!audioMap.has(x.path)) audioMap.set(x.path, await hasAudio(ff.path, x.path));
         if (audioMap.get(x.path) && x.srcOut - x.srcIn > 0.01) extra.push(x);
@@ -181,6 +184,7 @@ export async function exportStart(spec) {
         if (f.spot) { g.spotFile = path.join(tmp, `fxspot_${i}.png`); fs.writeFileSync(g.spotFile, Buffer.from(f.spot, 'base64')); }
         return g;
       });
+      const ovList = (spec.overlays || []).filter((o) => o && o.path && o.end - o.start > 0.01 && o.w > 0 && o.h > 0).map((o) => ({ ...o }));
       const cmdLines = [];
       const build = (encoder) => {
         const args = ['-hide_banner', '-y', '-nostdin'];
@@ -195,14 +199,16 @@ export async function exportStart(spec) {
           const hn = i > 0 && trOf(i - 1) ? trOf(i - 1).dur / 2 : 0;
           const tn = i < nS - 1 && trOf(i) ? trOf(i).dur / 2 : 0;
           const fileDur = Number(s.dur) > 0 ? Number(s.dur) : s.srcOut;
-          const preS = s.rev ? 0 : Math.min(hn * sp, Math.max(0, s.srcIn));
-          const postS = s.rev ? 0 : Math.min(tn * sp, Math.max(0, fileDur - s.srcOut));
+          const noSrc = s.rev || s.gap;   // 빈칸(검정)·거꾸로: 원본 여유분을 쓰지 않음
+          const preS = noSrc ? 0 : Math.min(hn * sp, Math.max(0, s.srcIn));
+          const postS = noSrc ? 0 : Math.min(tn * sp, Math.max(0, fileDur - s.srcOut));
           const realPre = preS / sp, realPost = postS / sp;
           return { sp, srcLen, len, hn, tn, preS, postS, realPre, realPost, padPre: hn - realPre, padPost: tn - realPost };
         });
         let inCount = 0;
         const segIn = spec.segments.map((s, i) => {
           const e = ext[i];
+          if (s.gap) return [];
           if (!s.rev) { args.push('-ss', fmtTime(s.srcIn - e.preS), '-t', fmtTime(e.preS + e.srcLen + e.postS), '-i', s.path); return [{ idx: inCount++ }]; }
           const parts = [];
           for (let c = s.srcOut; c > s.srcIn + 1e-4; c -= 2) {
@@ -220,6 +226,14 @@ export async function exportStart(spec) {
         for (const g of fxList) {
           if (g.maskFile) { args.push('-loop', '1', '-framerate', String(F), '-t', fmtTime(total), '-i', g.maskFile); g.maskIn = nextIn++; }
           if (g.spotFile) { args.push('-loop', '1', '-framerate', String(F), '-t', fmtTime(total), '-i', g.spotFile); g.spotIn = nextIn++; }
+        }
+        // 위 트랙(V2 이상)의 영상·사진
+        for (const o of ovList) {
+          const len = Math.max(0.01, o.end - o.start);
+          if (o.kind === 'video') args.push('-ss', fmtTime(o.srcIn), '-t', fmtTime(len), '-i', o.path);
+          else if (o.kind === 'gif') args.push('-ignore_loop', '0', '-t', fmtTime(len), '-i', o.path);
+          else args.push('-loop', '1', '-framerate', String(F), '-t', fmtTime(len), '-i', o.path);
+          o.inIdx = nextIn++;
         }
         const fc = [];
         const vlen = [];
@@ -239,6 +253,12 @@ export async function exportStart(spec) {
           const sv = s.vol == null ? 1 : Number(s.vol);
           const hasA = audioMap.get(s.path) && !s.muted;
           let vchain, achain = null;
+          if (s.gap) {
+            // 빈칸: 전환 여유분까지 포함한 길이의 검정 화면
+            fc.push(`color=c=black:s=${W}x${H}:r=${F}:d=${fmtTime(full + 0.1)},format=yuv420p,setsar=1,trim=duration=${fmtTime(full)},setpts=PTS-STARTPTS,fps=${F}[v${i}]`);
+            fc.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=${d},aformat=sample_fmts=fltp,asetpts=PTS-STARTPTS[a${i}]`);
+            return;
+          }
           if (!s.rev) {
             const k = segIn[i][0].idx;
             vchain = `[${k}:v]${scalePad},setpts=(PTS-STARTPTS)/${e.sp.toFixed(6)},fps=${F},trim=duration=${fmtTime(e.realPre + e.len + e.realPost)},setpts=PTS-STARTPTS`;
@@ -314,8 +334,9 @@ export async function exportStart(spec) {
             if (labels.length === 1) { fc.push(`[${labels[0]}]anull[${out}]`); return; }
             fc.push(labels.map((l) => `[${l}]`).join('') + `amix=inputs=${labels.length}:duration=first:dropout_transition=0,volume=${labels.length}[${out}]`);
           };
-          const voice = ['ac'].concat(extra.map((x, k) => (Number(x.track) === 3 ? null : `x${k}`)).filter(Boolean));
-          const bgm = extra.map((x, k) => (Number(x.track) === 3 ? `x${k}` : null)).filter(Boolean);
+          const isBgm = (x) => (x.bgm != null ? !!x.bgm : Number(x.track) === 3);
+          const voice = ['ac'].concat(extra.map((x, k) => (isBgm(x) ? null : `x${k}`)).filter(Boolean));
+          const bgm = extra.map((x, k) => (isBgm(x) ? `x${k}` : null)).filter(Boolean);
           const duck = spec.mix && spec.mix.duck && bgm.length;
           if (!duck) mixOf(voice.concat(bgm), 'am');
           else {
@@ -375,6 +396,21 @@ export async function exportStart(spec) {
         });
         if (cmdLines.length) fs.writeFileSync(path.join(tmp, 'fxcmds.txt'), cmdLines.join('\n') + '\n');
         if (fxList.length) { fc.push(`[${vcur}]trim=duration=${fmtTime(total)}[fxend]`); vcur = 'fxend'; }
+        // 위 트랙 영상·사진을 아래 트랙부터 차례로 얹음 (크기·위치·불투명도·나타나기/사라지기)
+        ovList.forEach((o, i) => {
+          const len = Math.max(0.01, o.end - o.start);
+          const w = even(o.w), h = even(o.h);
+          let ch = `[${o.inIdx}:v]setpts=PTS-STARTPTS,fps=${F},scale=${w}:${h},setsar=1,format=rgba`;
+          const op = o.opacity == null ? 1 : Math.max(0, Math.min(1, Number(o.opacity)));
+          if (op < 0.999) ch += `,colorchannelmixer=aa=${op.toFixed(3)}`;
+          const fi = Math.min(Number(o.fi) || 0, len / 2), fo = Math.min(Number(o.fo) || 0, len / 2);
+          if (fi > 0) ch += `,fade=t=in:st=0:d=${fmtTime(fi)}:alpha=1`;
+          if (fo > 0) ch += `,fade=t=out:st=${fmtTime(len - fo)}:d=${fmtTime(fo)}:alpha=1`;
+          fc.push(`${ch},trim=duration=${fmtTime(len)},setpts=PTS+${fmtTime(o.start)}/TB[ov${i}]`);
+          fc.push(`[${vcur}][ov${i}]overlay=x=${Math.round(o.x)}:y=${Math.round(o.y)}:eof_action=pass:enable='between(t,${fmtTime(o.start)},${fmtTime(Math.max(o.start, o.end - 0.001))})'[ovo${i}]`);
+          vcur = `ovo${i}`;
+        });
+        if (ovList.length) { fc.push(`[${vcur}]trim=duration=${fmtTime(total)}[ovend]`); vcur = 'ovend'; }
         let last = vcur;
         subs.forEach((s, k) => {
           const out = k === subs.length - 1 ? 'vsub' : `o${k}`;

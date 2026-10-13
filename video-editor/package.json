@@ -1,6 +1,6 @@
 {
   "name": "video-editor",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "영상 편집기 (Windows 데스크톱, AI 없는 버전)",
   "main": "main.mjs",
   "scripts": {

@@ -17,7 +17,7 @@ const VENDOR = {
 import { Application, getWebviewVersion } from './lib/index.js';
 import * as engine from './engine.mjs';
 
-const APP_VERSION = '1.5.1';  // AI 없는 버전
+const APP_VERSION = '1.6.0';  // AI 없는 버전
 const app = new Application();
 startMarks.appCreated = Date.now() - T_PROC0;
 const win = app.createBrowserWindow({
@@ -155,11 +155,12 @@ webview.expose('native', {
   pickVideos: async (single) => {
     let paths = win.openFileDialog({
       multiple: !single,
-      title: single ? '파일 다시 연결' : '영상·브금 가져오기',
+      title: single ? '파일 다시 연결' : '영상·음악·사진 가져오기',
       filters: [
-        { name: '영상·음악', extensions: ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'wmv', 'mts', 'm2ts', 'ts', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus'] },
+        { name: '영상·음악·사진', extensions: ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'wmv', 'mts', 'm2ts', 'ts', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
         { name: '영상', extensions: ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'wmv', 'mts', 'm2ts', 'ts'] },
         { name: '음악', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus'] },
+        { name: '사진', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
         { name: '모든 파일', extensions: ['*'] },
       ],
     });

@@ -3,7 +3,7 @@ Unicode true
 !define APPNAME "영상 편집기"
 !define APPID "VideoEditor"
 !ifndef VERSION
-  !define VERSION "1.5.1"
+  !define VERSION "1.5.0"
 !endif
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPID}"
 
